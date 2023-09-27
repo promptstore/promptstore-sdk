@@ -1,4 +1,4 @@
-const axios = require('axios');
+const axios = require('axios').default;
 
 function ApiService() {
 
@@ -17,7 +17,6 @@ function ApiService() {
 
   const setToken = (token) => {
     state = token;
-    // console.log('state:', state);
     if (typeof onRefreshCallback === 'function') {
       onRefreshCallback(token);
     }
@@ -52,7 +51,7 @@ function ApiService() {
     const clientSecret = process.env.KEYCLOAK_CLIENT_SECRET;
     const grantType = 'refresh_token';
 
-    console.log(`curl -vL -H 'Content-Type: application/x-www-form-urlencoded' ${url} -d 'client_id=${clientId}&client_secret=${clientSecret}&grant_type=${grantType}&refresh_token=${refreshToken}'`);
+    // console.log(`curl -vL -H 'Content-Type: application/x-www-form-urlencoded' ${url} -d 'client_id=${clientId}&client_secret=${clientSecret}&grant_type=${grantType}&refresh_token=${refreshToken}'`);
 
     const data = new URLSearchParams({
       client_id: clientId,
@@ -61,13 +60,12 @@ function ApiService() {
       refresh_token: refreshToken,
     });
     try {
-      const resp = await axios.post(url, data.toString(), {
+      const res = await axios.post(url, data.toString(), {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
       });
-      console.log('resp:', resp.data);
-      const { access_token, refresh_token } = resp.data;
+      const { access_token, refresh_token } = res.data;
       return {
         accessToken: access_token,
         refreshToken: refresh_token,
@@ -96,12 +94,12 @@ function ApiService() {
     // console.log('config:', config);
 
     const accessToken = getAccessToken();
-    // console.log('accessToken:', accessToken);
 
     if (accessToken) {
       config.headers['Authorization'] = 'Bearer ' + accessToken;
+    } else {
+      config.headers['apikey'] = process.env.PROMPTSTORE_API_KEY;
     }
-    config.headers['apikey'] = process.env.PROMPTSTORE_API_KEY;
 
     return config;
 
@@ -112,12 +110,11 @@ function ApiService() {
   instance.interceptors.response.use((res) => {
     return res;
   }, (err) => {
-    console.log(err);
+    // console.log(err);
 
     const originalRequest = err.config;
-    // console.log('originalRequest:', originalRequest);
 
-    const status = err.response?.status;
+    const status = err?.response?.status;
     if ((status === 401 || status === 403) && !originalRequest._retry) {
       if (isTokenRefreshing) {
         console.log('token is refreshing');
@@ -127,12 +124,10 @@ function ApiService() {
         })
           .then((accessToken) => {
             originalRequest.headers['Authorization'] = 'Bearer ' + accessToken;
-            // console.log('originalRequest:', originalRequest);
-
             return instance(originalRequest);
           })
           .catch((err) => {
-            console.log(err);
+            console.log(err, err.stack);
             return err;
           });
       }
@@ -143,7 +138,6 @@ function ApiService() {
       return new Promise((resolve, reject) => {
 
         const refreshToken = getRefreshToken();
-        // console.log('refreshToken:', refreshToken);
 
         console.log('get new token');
         getNewToken(refreshToken)
@@ -153,14 +147,13 @@ function ApiService() {
             setToken(token);
 
             originalRequest.response.config.headers['Authorization'] = 'Bearer ' + token.accessToken;
-            // console.log('originalRequest:', originalRequest);
 
             instance(originalRequest).then(resolve, reject);
             processQueue(null, token.accessToken);
 
           })
           .catch((err) => {
-            console.log(err);
+            console.log(err, err.stack);
             processQueue(err);
             reject(err);
             if (typeof onExpiryCallback === 'function') {

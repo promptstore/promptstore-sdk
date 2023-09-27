@@ -76,3 +76,4 @@ node_modules/
 db.json
 *.tgz
 scratchpad.md
+.env.keycloak

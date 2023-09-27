@@ -1,54 +1,29 @@
 const FormData = require('form-data');
-const axios = require('axios');
 const fs = require('fs');
 const mime = require('mime-types');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+
+const { KeycloakAuth } = require('./keycloak_auth');
 const { http, setToken } = require('./http');
-const { stripEmpty } = require('./utils');
+const { getSearchType, stripEmptyValues } = require('./utils');
 
 class PromptStore {
 
-  constructor({ logger }) {
+  constructor({ constants, logger, callback }) {
+    this.constants = constants || {};
     this.logger = logger;
-    this.url = process.env.PROMPTSTORE_BASE_URL;
+    this.url = this.constants.PROMPTSTORE_BASE_URL || process.env.PROMPTSTORE_BASE_URL;
+    this.workspaceId = this.constants.WORKSPACE_ID || process.env.WORKSPACE_ID;
     this.functions = {};
-    this.workspaceId = process.env.WORKSPACE_ID;
     if (process.env.AUTH_METHOD?.toLowerCase() === 'oauth') {
-      this.getAccessToken().then((token) => {
-        // logger.debug('token:', token);
+      const auth = new KeycloakAuth(this.constants, logger);
+      auth.getAccessToken().then((token) => {
         setToken(token);
+        if (typeof callback === 'function') {
+          callback();
+        }
       });
-    }
-  }
-
-  async getAccessToken() {
-    const {
-      KEYCLOAK_HOST: host,
-      PROMPTSTORE_KEYCLOAK_REALM: realm,
-      PROMPTSTORE_KEYCLOAK_CLIENT_ID: clientId,
-      PROMPTSTORE_KEYCLOAK_CLIENT_SECRET: clientSecret,
-    } = process.env;
-    const url = `${host}/realms/${realm}/protocol/openid-connect/token`;
-    const grantType = 'client_credentials';
-
-    // this.logger.debug(`curl -vL -H 'Content-Type: application/x-www-form-urlencoded' ${url} -d 'client_id=${clientId}&client_secret=${clientSecret}&grant_type=${grantType}'`);
-
-    const data = new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      grant_type: grantType,
-    });
-    try {
-      const resp = await axios.post(url, data.toString(), {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      });
-      return resp.data;
-    } catch (err) {
-      this.logger.error(err);
-      throw err;
     }
   }
 
@@ -56,16 +31,16 @@ class PromptStore {
     this[name] = async (args, paramOverrides) => {
       const res = await http.post(`${this.url}/executions/${name}`, {
         args,
-        params: { ...params, ...stripEmpty(paramOverrides) },
+        params: { ...params, ...stripEmptyValues(paramOverrides) },
         workspaceId: this.workspaceId,
       });
-      // this.logger.debug('res:', res.data);
+      const { response } = res.data;
       if (contentOnly) {
-        return res.data.content;
+        return response.choices[0].message.content;
       }
-      return res.data;
+      return response;
     };
-    return this;
+    return this[name].bind(this);
   }
 
   async execute(name, args, params, contentOnly = false) {
@@ -74,15 +49,15 @@ class PromptStore {
       params,
       workspaceId: this.workspaceId,
     });
-    // this.logger.debug('res:', res.data);
+    const { response } = res.data;
     if (contentOnly) {
-      return res.data.content;
+      return response.choices[0].message.content;
     }
-    return res.data;
+    return response;
   }
 
-  async chatCompletion(messages, model, maxTokens) {
-    const res = await http.post(`${this.url}/chat`, { messages, model, maxTokens });
+  async chatCompletion(messages, model, maxTokens, indexName) {
+    const res = await http.post(`${this.url}/chat`, { messages, model, maxTokens, indexName });
     return res.data;
   }
 
@@ -105,9 +80,7 @@ class PromptStore {
     this.logger.debug(`getWorkspacePromptSetsBySkill [workspaceId=${workspaceId}; skill=${skill}]`);
     try {
       const url = `${this.url}/workspaces/${workspaceId}/prompt-sets?skill=${skill}`;
-      // this.logger.debug('url:', url);
       const res = await http.get(url);
-      // this.logger.debug('data:', res.data);
       return res.data;
     } catch (err) {
       this.logger.debug('error:', err);
@@ -132,7 +105,7 @@ class PromptStore {
         contentType: file.mimetype,
       });
       const url = `${this.url}/upload/`;
-      const res = axios.post(url, form, {
+      const res = http.post(url, form, {
         headers: form.getHeaders(),
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
@@ -140,8 +113,64 @@ class PromptStore {
       this.logger.debug('File uploaded to document service successfully.');
       // this.logger.debug('res: ', res.data);
     } catch (err) {
-      this.logger.log('error', String(err));
+      this.logger.log('error', String(err), err.stack);
+      throw err;
     }
+  }
+
+  async getIndexes() {
+    const url = `${this.url}/index`;
+    const res = await http.get(url);
+    return res.data;
+  }
+
+  async getIndex(name) {
+    const url = `${this.url}/index/${name}`;
+    try {
+      const res = await http.get(url);
+      return res.data;
+    } catch (err) {
+      this.logger.debug(String(err));
+      return null;
+    }
+  }
+
+  async createIndex(indexName, schema) {
+    const url = `${this.url}/index`;
+    await http.post(url, { indexName, schema });
+  }
+
+  async indexDocuments(indexName, documents) {
+    const url = `${this.url}/documents`;
+    await http.post(url, { indexName, documents });
+  }
+
+  async dropDocuments(indexName, query, attrs) {
+    const ps = Object.entries(attrs).map(([k, v]) => `${k}=${v}`).join('&');
+    let url = this.url + '/delete-matching?indexName=' + indexName;
+    if (query) {
+      url += '&q=' + query;
+    }
+    if (ps) {
+      url += '&' + ps;
+    }
+    await http.delete(url);
+  }
+
+  getSearchSchema(schema) {
+    const fields = Object.entries(schema).reduce((a, [k, v]) => {
+      const flds = Object.entries(v).reduce((b, [key, val]) => {
+        b[k.toLowerCase() + '_' + key.toLowerCase()] = {
+          type: getSearchType(val.dataType),
+        };
+        return b
+      }, a);
+      flds[k.toLowerCase() + '__label'] = {
+        type: 'TEXT'
+      };
+      return flds;
+    }, {});
+    return fields;
   }
 
 }

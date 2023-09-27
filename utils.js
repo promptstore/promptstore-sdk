@@ -17,11 +17,11 @@ const isObject = (value) => {
   return value != null && (type === 'object' || type === 'function');
 };
 
-const stripEmpty = (obj) => {
+const stripEmptyValues = (obj) => {
   const inner = (val) => {
     if (Array.isArray(val)) {
       if (val.length) {
-        const arr = val.map(inner).filter((x) => x !== null);
+        const arr = val.map(inner).filter(x => x !== null);
         if (arr.length) {
           return arr;
         }
@@ -48,8 +48,27 @@ const stripEmpty = (obj) => {
   return inner(obj);
 };
 
+const getSearchType = (dataType) => {
+  switch (dataType) {
+    case 'String':
+    case 'DateTime':
+      return 'TEXT';
+
+    case 'Boolean':
+      return 'TAG';
+
+    case 'Double':
+    case 'Long':
+      return 'NUMERIC';
+
+    default:
+      return 'TEXT';
+  }
+}
+
 module.exports = {
+  getSearchType,
   isEmpty,
   isObject,
-  stripEmpty,
+  stripEmptyValues,
 };
