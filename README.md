@@ -1,11 +1,35 @@
 # promptstore-sdk
 
-## Installation
+## Installation - Library
+
+    npm i --save promptstore-sdk
+
+## Basic usage
+
+    const { PromptStore, logger } = require('promptstore-sdk');
+
+    const ps = new PromptStore({ logger });
+
+    ps.execute({
+      name: 'summarize',
+      args: { content: `On two occasions, I have been asked [by members of Parliament], 'Pray, Mr. Babbage, if you put into the machine wrong figures, 
+will the right answers come out?' I am not able to rightly apprehend the kind of confusion of ideas that could provoke such a question.` },
+      contentOnly: true,
+    })
+    .then((content) => {
+      console.log(content);
+    })
+    .catch((err) => {
+      console.error(err.message);
+    });
+
+## Installation - Test environment
 
 ### Install Python environment
 
     python -m venv venv
-    ./venv/bin/activate
+    . venv/bin/activate
+    pip install --upgrade pip
     pip install -r requirements.txt
 
 ### Install Node environment
@@ -41,4 +65,4 @@ Check two kernels (jslab and tslab) are installed properly to jupyter.
 
     jupyter lab
 
-Use the Typescript kernel.
+Use the TypeScript kernel.

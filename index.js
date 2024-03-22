@@ -97,15 +97,19 @@ async function watch(folder) {
   });
 }
 
-vorpal
-  .command('watch <folder>', "Watches a folder")
-  .autocomplete(fsAutocomplete({ directory: true }))
-  .action((args, callback) => {
-    watch(args.folder);
-  });
-
-splash().then(() => {
+function cli() {
   vorpal
-    .delimiter('>')
-    .show();
-});
+    .command('watch <folder>', "Watches a folder")
+    .autocomplete(fsAutocomplete({ directory: true }))
+    .action((args, callback) => {
+      watch(args.folder);
+    });
+
+  splash().then(() => {
+    vorpal
+      .delimiter('>')
+      .show();
+  });
+}
+
+module.exports = { PromptStore, cli, logger };
